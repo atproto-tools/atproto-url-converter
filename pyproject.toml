@@ -1,0 +1,36 @@
+[project]
+name = "atproto-url-converter"
+version = "0.0.1"
+description = "convert between https:// and at:// URLs"
+authors = [
+    {name = "autumn",email = "186870771+aeshna-cyanea@users.noreply.github.com"}
+]
+license = {text = "Apache-2.0"}
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "atproto (>=0.0.59,<0.1)",
+    "beautifulsoup4 (>=4.13.3,<5.0.0)"
+]
+scripts = { "convert-at-url" = "at_url_converter.converter:cli" }
+
+[tool.poetry]
+packages = [
+    {include = "at_url_converter", from = "src"}
+]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.5"
+pytest-trio = "^0.8.0"
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+trio_mode = true
+verbosity_assertions = 2
+pythonpath = [
+  "src"
+]
