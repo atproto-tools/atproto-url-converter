@@ -17,17 +17,21 @@ if __name__ == "__main__":
     enum_dict = defaultdict(list)
     for record in t['records']:
         fields = record["fields"]
+        if not fields.get("Lexicons"):
+            continue
         lex_name, rec_name = fields["name_pair"].split(" ")
-        url = fields["html_url"]
+        url = fields["web_url"]
         template = line_template if url else undocumented_template
         line = template.format(url=url, name=rec_name, nsid=fields["nsid"])
 
         enum_dict[lex_name].append(line)
 
-    code = "".join([enum_template.format(name=enum_name, lines='\n'.join(lines)) for enum_name, lines in enum_dict.items()])
+    code = "from enum import StrEnum\n" + "".join([
+        enum_template.format(name=enum_name, lines="\n".join(lines))
+        for enum_name, lines in enum_dict.items()
+    ])
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_path = os.path.join(script_dir, "atproto_url_converter", "lex.py")
+    output_path = os.path.join(script_dir, "at_url_converter", "lex.py")
     with open(output_path, 'w') as f:
-        f.write("from enum import StrEnum\n")
         f.write(code)
