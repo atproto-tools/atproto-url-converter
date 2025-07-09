@@ -32,7 +32,7 @@ async def handler(u: url_obj) -> at_url | None:
                     case "feed-generators":
                         out.collection = lex.bsky.feedgen
                     case "feeds":
-                        out.collection = lex.bsky.post 
+                        out.collection = lex.bsky.post
                     case None:
                         pass
                     case _ as suffix:

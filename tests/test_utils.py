@@ -42,7 +42,7 @@ async def test_at_url_properties():
 
     # Test repo property with missing repo
     uri = at_url(repo=VALID_DID)
-    uri.did = None
+    uri.did = ""
     with pytest.raises(AttributeError):
         _ = uri.repo
 
@@ -70,29 +70,16 @@ async def test_at_url_get_did(mock_resolver):
 
 async def test_at_url_iter():
     uri = at_url(repo=VALID_DID, collection="app.bsky.feed.post", rkey="123456789abcdefghi", query="param=value", fragment="fragment")
-    parts = list(uri.items())
+    parts = [i for i in uri]
     assert parts == [
-        ("repo", VALID_DID),
+        ("did", VALID_DID),
         ("collection", "app.bsky.feed.post"),
         ("rkey", "123456789abcdefghi"),
         ("query", [("param", "value")]),
-        ("fragment", "fragment")
+        ("fragment", "fragment"),
+        ("handle", ""), # this is clunky, but idk if it's a good idea to make custom iterators that exclude falsey values
     ]
 
-async def test_at_url_getitem():
-    uri = at_url(repo=VALID_DID, collection="app.bsky.feed.post", rkey="123456789abcdefghi", query="param=value", fragment="fragment")
-    assert uri["repo"] == VALID_DID
-    assert uri["collection"] == "app.bsky.feed.post"
-    assert uri["rkey"] == "123456789abcdefghi"
-    assert uri["query"] == [("param", "value")]
-    assert uri["fragment"] == "fragment"
-
-    with pytest.raises(KeyError):
-        _ = uri["invalid_key"]
-
-async def test_at_url_len():
-    uri = at_url(repo=VALID_DID, collection="app.bsky.feed.post", rkey="123456789abcdefghi", query="param=value", fragment="fragment")
-    assert len(uri) == 5
 
 async def test_at_url_eq():
     uri1 = at_url(repo=VALID_DID, collection="app.bsky.feed.post", rkey="123456789abcdefghi", query="param=value", fragment="fragment")
@@ -108,9 +95,10 @@ async def test_at_url_str():
 
 async def test_at_url_repr():
     uri = at_url(repo=VALID_DID, collection="app.bsky.feed.post", rkey="123456789abcdefghi", query="param=value", fragment="fragment", handle=VALID_HANDLE)
-    assert uri.__repr__() == "at_url(repo='did:example:123456789abcdefghi', collection='app.bsky.feed.post', rkey='123456789abcdefghi', query=[('param', 'value')], fragment='fragment', handle='example.com')"
+    # assert uri.__repr__() == "at_url(did='did:example:123456789abcdefghi', collection='app.bsky.feed.post', rkey='123456789abcdefghi', query=[('param', 'value')], fragment='fragment', handle='example.com')"
+    assert uri.__repr__() == "at_url(did='did:example:123456789abcdefghi', collection='app.bsky.feed.post', rkey='123456789abcdefghi', handle='example.com')"
     uri = at_url(repo='did:example:123456789abcdefghi', collection='app.bsky.feed.post')
-    assert uri.__repr__() == "at_url(repo='did:example:123456789abcdefghi', collection='app.bsky.feed.post')"
+    assert uri.__repr__() == "at_url(did='did:example:123456789abcdefghi', collection='app.bsky.feed.post')"
 
 async def test_get_pds():
     print(await atproto_utils.get_pds("aeshna-cyanea.bsky.social"))

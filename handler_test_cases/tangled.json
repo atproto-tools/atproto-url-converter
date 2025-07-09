@@ -1,10 +1,10 @@
 [
     [
-        "https://tangled.sh/@mary.my.id",
-        "at://did:plc:ia76kvnndjutgedggx2ibrem/sh.tangled.repo"
+        "https://tangled.sh/@tangled.sh",
+        "at://did:plc:wshs7t2adsemcrrd4snkeqli/sh.tangled.actor.profile"
     ],
     [
-        "https://tangled.sh/@mary.my.id/boat",
-        "at://did:plc:ia76kvnndjutgedggx2ibrem/sh.tangled.repo/3lk3ewpvur622"
+        "https://tangled.sh/@tangled.sh/core",
+        "at://did:plc:wshs7t2adsemcrrd4snkeqli/sh.tangled.repo/3liuighjy2h22"
     ]
 ]

@@ -5,7 +5,7 @@ import os
 from typing import Iterable, Literal, Optional
 
 # should be made mostly obsolete by structural pattern matching but eh
-def get_index(sequence: list | tuple, index, default = None):
+def get_index[T](sequence: list[T] | tuple[T], index, default: T | None = None) -> T | None:
     try:
         return sequence[index]
     except IndexError:

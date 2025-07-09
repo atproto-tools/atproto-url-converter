@@ -1,28 +1,37 @@
-# ruff: noqa: F401
-from collections.abc import AsyncGenerator, Sequence
-from typing import Any, Literal, Optional, cast
+from collections.abc import AsyncGenerator
+from typing import Annotated, Any, Literal, Optional, cast
+from pydantic import BaseModel, BeforeValidator, Field, TypeAdapter, ValidationError, model_validator
 from at_url_converter.boilerplate import get_index, get_timed_logger
 import re
 from atproto import AsyncIdResolver, AsyncDidInMemoryCache, AsyncClient
 from atproto.exceptions import AtProtocolError
-from atproto_client.models.com.atproto.repo.get_record import Response
 from atproto_client.models.com.atproto.repo.list_records import Params, Record
 # TODO consider switching to a different parsing lib for better validation https://sethmlarson.dev/why-urls-are-hard-path-params-urlparse
-from collections.abc import Mapping
 from urllib.parse import urlparse, parse_qsl, unquote, urlunparse
-from atproto_client.models.string_formats import AtIdentifier, Nsid, RecordKey
+from atproto_client.models.string_formats import Did, Handle, AtIdentifier, Nsid, RecordKey
 log = get_timed_logger("converter")
 
 MAX_LIST_LIMIT = 100
 MAX_BATCH_SIZE = 100 # batch size 100 defined by https://docs.bsky.app/docs/api/com-atproto-repo-list-records
 
-def split_path(path_str: str) -> list[str]:
+#TODO ok this is technically incorrect, it ignores trailing slashes
+def split_path(path_str: str, remove_trail = True) -> list[str]:
+    if remove_trail and path_str.endswith("/"):
+        path_str = path_str[:-1]
+    if not path_str:
+        return []
     return [unquote(i) for i in path_str.split("/") if i]
 
 def path_index(path: list[str] | str, index: int, default: Optional[str] = None):
     if isinstance(path, str):
         path = split_path(path)
     return get_index(path, index, default)
+
+def match_parsed_query(data):
+    if isinstance(data, str):
+        return parse_query(data)
+    else:
+        return data
 
 def parse_query(query_str: str) -> list[tuple[str, str]]:
     return [(unquote(k), unquote(v)) for k, v in parse_qsl(query_str)]
@@ -66,69 +75,87 @@ class url_obj:
             query = self.query
         return find_query_param(param, query)
 
-#TODO this should really be a pydantic model but that needs coordination. ask marshalx for pointers/approval
-class at_url(Mapping):
+class at_url(BaseModel):
     """object that stores components of an at URI. parts acessible by dot notation"""
-    did: str | None
-    handle: str | None
-    # @validate_call(config={"strict": True})
+    did: Did = ""
+    collection: Nsid = ""
+    rkey: RecordKey = ""
+    # query and fragment are mostly unused for now, so we don't show them in repr
+    query: Annotated[list[tuple[str, str]], Field(repr=False), BeforeValidator(match_parsed_query)] = []
+    fragment: Annotated[str, Field(repr=False)] = ""
+    handle: Handle = ""
+
     def __init__(
         self,
-        # repo: AtIdentifier,
-        # collection: Nsid = None,
-        # rkey: RecordKey = None,
-        repo: str,
+        repo: Optional[str] = None,
         collection: Optional[str] = None,
         rkey: Optional[str] = None,
-        # cid: Optional[str] = None,
-        query: Optional[str | Sequence[tuple[str, str]]] = None,
+        query: Optional[str | list[tuple[str, str]]] = None,
         fragment: Optional[str] = None,
-        handle: Optional[str] = None
+        *,
+        did: Optional[str] = None,
+        handle: Optional[str] = None,
     ):
-        """handle is an optional param in case you want to store both for some reason. stringify-ing the uri will always output the DID"""
-        if not repo:
-            raise ValueError(f'no valid repo in at_url constructor! args: {locals()}')
-        repo = repo.removeprefix("@")
-        if did_pattern.match(repo):
-            self.did, self.handle = repo, handle or ""
-        elif handle_pattern.match(repo):
-            self.handle, self.did = repo, ""
-        else:
-            raise ValueError(f"repo param {repo} is not a handle or did!")
-        
-        self.collection: Nsid = collection or ""
-        self.rkey: RecordKey = rkey or ""
-        # self.cid: Cid = cid or ""
-        if isinstance(query, str):
-            self.query = parse_query(query or "")
-        else:
-            self.query = list(query) if query else []
-        self.fragment = fragment or ""
+        out = {
+            "did": did or "",
+            "handle": handle or "",
+            "collection": collection or "",
+            "rkey": rkey or "",
+            "query": query or [],
+            "fragment": fragment or "",
+        }
+        if repo:
+            repo = repo.removeprefix("@")
+            try:
+                TypeAdapter(Did).validate_python(repo, context={"strict_string_format": True})
+                if did:
+                    log.warning(f"make_at_url: did {did} is being replaced by positional repo {repo}")
+                out["did"] = repo
+            except ValidationError:
+                try:
+                    TypeAdapter(Handle).validate_python(repo, context={"strict_string_format": True})
+                    if handle:
+                        log.warning(f"make_at_url: handle {handle} is being replaced by positional repo {repo}")
+                    out["handle"] = repo
+                except ValidationError:
+                    pass # if it is neither, there might still be a valid did or handle in the kwargs, so we don't raise an error here
+        #TODO enable actual validation of did and handle when passed as kwargs
+        return super().__init__(**out)
 
-    parts = ("repo", "collection", "rkey", "query", "fragment")
+    @model_validator(mode="after")
+    def _check_handle_or_did(self):
+        if not (self.handle or self.did):
+            raise ValueError("at_url: either 'handle' or 'did' must be present")
+        return self
 
     @classmethod
     def from_str(cls, url: str):
-        #TODO add proper validation function from atproto_client.models.string_formats
+        # the spec said we could use urlparse, so we do ^_^ technically aturls are not valid urls tho
+        # https://github.com/bluesky-social/atproto-website/issues/417
         parsed = urlparse(url)
-        repo = parsed.netloc
         path = split_path(parsed.path)
         if len(path) > 2:
-            raise ValueError(f"at_url.from_str(): excessively long path path in atproto url:\n{url}\n{path}")
-        collection = get_index(path, 0)
-        rkey = get_index(path, 1)
-        query = parsed.query
-        fragment = parsed.fragment
-        return cls(repo, collection, rkey, query, fragment)
+            raise ValueError(f"excessively long path path in atproto url:\n{url}\n{path}")
+        return cls(
+            parsed.netloc,
+            path[0],
+            path[1],
+            parsed.query,
+            parsed.fragment
+        )
+
 
     @property
     def repo(self) -> AtIdentifier:
         repo = self.did or self.handle
         if not repo:
-            placeholder_repr = {k: self[k] for k in self.parts[1:]}
-            #TODO convert to pydantic model so repr looks decent
-            raise AttributeError(f"at_url {placeholder_repr} has no defined repo")
+            raise AttributeError(f"at_url {repr(self)} has no defined repo")
         return repo
+
+    def __repr__(self):
+        set_fields = {k: v for k,v in self.__repr_args__() if k and v} # idk why __repr_args__() returns None for some keys
+        args = ", ".join([k + "=" + (str(v) if k == "query" else f"'{v}'") for k,v in set_fields.items()])
+        return f'{self.__class__.__name__}({args})'
 
     async def get_handle(self, verify: Literal[0, 1, 2] = 0):
         '''
@@ -179,6 +206,29 @@ class at_url(Mapping):
             return None
 
     async def get_did(self, verify: Literal[0, 1, 2] = 0) -> AtIdentifier | None: #TODO add validation after fetch
+        """
+        Asynchronously retrieves and verifies the Decentralized Identifier (DID) associated with the current instance.
+
+        Args:
+            verify (Literal[0, 1, 2], optional): 
+                Verification level for the DID and handle.
+                - 0: No verification, return cached DID if available.
+                - 1: Verify the DID by resolving it.
+                - 2: Additionally verify that the handle matches the DID document.
+
+        Returns:
+            Optional[AtIdentifier]: The resolved and optionally verified DID, or None if resolution fails.
+
+        Raises:
+            AttributeError: If neither DID nor handle is available for resolution.
+            ValueError: If the resolved DID does not match the expected value.
+
+        Notes:
+            - If both DID and handle are present, the method ensures they are consistent.
+            - If only the handle is present, it attempts to resolve the DID from the handle.
+            - Logs warnings if inconsistencies are found or if verification fails.
+            - Returns None and logs an error if an AtProtocolError is encountered during resolution.
+        """
         try:
             if self.did:
                 if not verify:
@@ -212,58 +262,26 @@ class at_url(Mapping):
     async def get_pds(self, verify: Literal[0, 1] = 0):
         if did := await self.get_did():
             return await get_pds(did, verify)
-    
-    def __iter__(self):
-        yield from self._get_parts()
-
-    def __getitem__(self, key: str):
-        if key in at_url.parts:
-            return getattr(self, key)
-        else:
-            raise KeyError(f"{key} is not a valid part of an at_url")
-        
-    def __len__(self):
-        return len(self._get_parts())
-
-    def _get_parts(self):
-        return {part: part_val for part in at_url.parts if (part_val := getattr(self, part, None))}
-        # return tuple(part_val for part in at_url.parts if (part_val := getattr(self, part)))
-
-    def __eq__(self, value) -> bool:
-        if isinstance(value, at_url):
-            return self._get_parts() == value._get_parts()
-        else:
-            return False
 
     def __str__(self):
         cs = self.collection
         rs = self.rkey
         ps = cs + "/" + rs if rs else cs
         ql = getattr(self, "query", [])
-        qs = "&".join("=".join((i[0], i[1])) for i in ql) if self.query else ""
-        try:
-            repo = self.repo
-        except ValueError:
-            repo = "<missing repo>"
-        return urlunparse(("at", repo, ps, "", qs, self.fragment or ""))
+        qs = "&".join("=".join((i[0], i[1])) for i in ql) if self.query else "" # using .join because not all queries have params
+        return urlunparse(("at", self.repo, ps, "", qs, self.fragment or ""))
 
-    def __repr__(self):
-        parts = self._get_parts()
-        if self.did and self.handle:
-            parts['handle'] = self.handle
-        args = ", ".join([k + "=" + (str(v) if k == "query" else f"'{v}'") for k,v in parts.items()])
-        return f"at_url({args})"
+print(at_url.model_validate({"did": "did:example:1234567890abcdef", "collection": "app.bsky.feed.post", "rkey": "123456789abcdefghi", "query": [("param", "value")], "fragment": "fragment"}, context={"strict_string_format": True}))
 
 # afaict these use a single global client so we should be good to loop
 resolver = AsyncIdResolver(cache=AsyncDidInMemoryCache())
 c = AsyncClient()
 _get_record = c.com.atproto.repo.get_record
-_list_records = c.com.atproto.repo.list_records
 _describe_repo = c.com.atproto.repo.describe_repo
 httpx_client = c._request._client #TODO ask is this bad? i don't really want to make my own client if i can steal one tbh
 
-async def get_record(u: at_url) -> Response:
-    c.update_base_url(await get_pds(u.repo))
+async def get_record(u: at_url):
+    c.update_base_url(await u.get_pds())
     if not u.collection or not u.rkey:
         raise ValueError(f"get_record: {u} is not a link to a record")
     return await _get_record({
@@ -348,7 +366,7 @@ async def list_records(u: at_url, limit: int | Literal[False] = MAX_LIST_LIMIT, 
     )
     while limit is False or limit > 0:
         #TODO maybe add an eager fetch that immediately fetches the next batch again
-        r = await _list_records(p)
+        r = await c.com.atproto.repo.list_records(p)
 
         for rec in r.records:
             yield rec

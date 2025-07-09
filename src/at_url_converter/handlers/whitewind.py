@@ -14,6 +14,7 @@ async def handler(u: url_obj) -> at_url | None:
             out = at_url(author, collection)
             if rkey := u.find_query_param("rkey"):
                 out.rkey = rkey
+                return out
             elif title := get_index(rest, 0):
                 checked = 0
                 recs = list_records(out)
@@ -29,5 +30,5 @@ async def handler(u: url_obj) -> at_url | None:
                 else:
                     log.error(f"could not find a post titled {title}")
                     return None
-        case[author, rkey, _]: #blocked include third cid segment once we get them in uris
+        case[author, rkey, cid]: #blocked include third cid segment once we get them in uris
             return at_url(author, collection, rkey)

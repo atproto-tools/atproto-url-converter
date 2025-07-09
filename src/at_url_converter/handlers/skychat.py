@@ -3,12 +3,12 @@ from at_url_converter import lex
 
 hosts = ['skychat.social']
 
+#TODO routes are there in skychat routes but doesn't actually seem to work https://github.com/badlogic/skychat/blob/main/src/elements/routing.ts
 params = {
     "thread": lex.bsky.post,
     "likes": lex.bsky.like,
     "follows": lex.bsky.follow
 }
-
 
 async def handler(u: url_obj) -> at_url | None:
     match u.split_path(u.fragment):

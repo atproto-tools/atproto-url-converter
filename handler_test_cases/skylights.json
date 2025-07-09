@@ -2,5 +2,9 @@
     [
         "https://skylights.my/profile/watwa.re",
         "at://did:plc:c764uyv2vgzswy5gpc4jgknf/my.skylights.rel"
+    ],
+    [
+        "https://skylights.my/profile/aeshna-cyanea.bsky.social?list=owned",
+        "at://did:plc:fxnw2wkzf23zya6shq4pxvh6/my.skylights.listItem"
     ]
 ]
