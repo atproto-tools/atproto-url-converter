@@ -30,5 +30,5 @@ async def handler(u: url_obj) -> at_url | None:
                 else:
                     log.error(f"could not find a post titled {title}")
                     return None
-        case[author, rkey, cid]: #blocked include third cid segment once we get them in uris
+        case[author, rkey, cid]: #blocked include third cid segment once we get them in uris  # noqa: F841
             return at_url(author, collection, rkey)
