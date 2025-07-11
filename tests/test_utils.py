@@ -100,8 +100,7 @@ async def test_at_url_str():
 
 async def test_at_url_repr():
     uri = at_url(repo=VALID_DID, collection="app.bsky.feed.post", rkey="123456789abcdefghi", query="param=value", fragment="fragment", handle=VALID_HANDLE)
-    # assert uri.__repr__() == "at_url(did='did:example:123456789abcdefghi', collection='app.bsky.feed.post', rkey='123456789abcdefghi', query=[('param', 'value')], fragment='fragment', handle='example.com')"
-    assert uri.__repr__() == "at_url(did='did:example:123456789abcdefghi', collection='app.bsky.feed.post', rkey='123456789abcdefghi', handle='example.com')"
+    assert uri.__repr__() == "at_url(did='did:example:123456789abcdefghi', collection='app.bsky.feed.post', rkey='123456789abcdefghi', query=[('param', 'value')], fragment='fragment', handle='example.com')"
     uri = at_url(repo='did:example:123456789abcdefghi', collection='app.bsky.feed.post')
     assert uri.__repr__() == "at_url(did='did:example:123456789abcdefghi', collection='app.bsky.feed.post')"
 

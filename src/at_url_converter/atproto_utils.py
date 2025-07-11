@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator
 import os
 from typing import Annotated, Any, ClassVar, Literal, Optional, cast
-from pydantic import BaseModel, BeforeValidator, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, model_validator
 from at_url_converter.boilerplate import get_index, get_timed_logger
 import re
 from atproto import AsyncIdResolver, AsyncDidInMemoryCache, AsyncClient
@@ -9,7 +9,10 @@ from atproto.exceptions import AtProtocolError
 from atproto_client.models.com.atproto.repo.list_records import Params, Record
 # TODO consider switching to a different parsing lib for better validation https://sethmlarson.dev/why-urls-are-hard-path-params-urlparse
 from urllib.parse import urlparse, parse_qsl, unquote, urlunparse
-from atproto_client.models.string_formats import Did, Handle, AtIdentifier, Nsid, RecordKey
+from atproto_client.models.string_formats import Did, AtIdentifier, Nsid, RecordKey
+from atproto_client.models.string_formats import Handle as _Handle
+
+Handle = Annotated[_Handle, BeforeValidator(lambda x: x.removeprefix("@") if isinstance(x, str) else x)]
 
 VALIDATE_AT_URL_FIELDS = os.environ.get("AT_URL_CONVERTER_VALIDATE_AT_URL_FIELDS", "0") # s1 to enable globally, 0 or unset to disable
 
@@ -19,12 +22,13 @@ MAX_LIST_LIMIT = 100
 MAX_BATCH_SIZE = 100 # batch size 100 defined by https://docs.bsky.app/docs/api/com-atproto-repo-list-records
 
 #TODO ok this is technically incorrect, it ignores trailing slashes
-def split_path(path_str: str, remove_trail = True) -> list[str]:
-    if remove_trail and path_str.endswith("/"):
-        path_str = path_str[:-1]
+def split_path(path_str: str, remove_trailing = True) -> list[str]:
+    path_str = path_str.removeprefix("/")
+    if remove_trailing:
+        path_str = path_str.removesuffix("/")
     if not path_str:
         return []
-    return [unquote(i) for i in path_str.split("/") if i]
+    return [unquote(i) for i in path_str.split("/")]
 
 def path_index(path: list[str] | str, index: int, default: Optional[str] = None):
     if isinstance(path, str):
@@ -85,27 +89,29 @@ class url_obj:
             query = self.query
         return find_query_param(param, query)
 
+type AllowEmpty[T] = T | Literal[""]
+
 class at_url(BaseModel):
     """object that stores components of an at URI. parts acessible by dot notation"""
-    did: Did | Literal[""] = ""
-    collection: Nsid | Literal[""] = ""
-    rkey: RecordKey | Literal[""] = ""
-    query: Annotated[list[tuple[str, str]], Field(repr=False), BeforeValidator(parse_query_str)] = []
-    fragment: Annotated[str, Field(repr=False)] = ""
-    handle: Handle | Literal[""] = ""
+    did: AllowEmpty[Did]= ""
+    collection: AllowEmpty[Nsid] = ""
+    rkey: AllowEmpty[RecordKey] = ""
+    query: Annotated[parsed_query, BeforeValidator(parse_query_str)] = []
+    fragment: str = ""
+    handle: AllowEmpty[Handle] = ""
 
     strict_string_flag: ClassVar[bool] = bool(int(VALIDATE_AT_URL_FIELDS))
 
     def __init__(
         self,
-        repo: Optional[str] = None,
-        collection: Optional[str] = None,
-        rkey: Optional[str] = None,
+        repo: Optional[AtIdentifier] = None,
+        collection: Optional[Nsid] = None,
+        rkey: Optional[RecordKey] = None,
         query: Optional[str | list[tuple[str, str]]] = None,
         fragment: Optional[str] = None,
         *,
-        did: Optional[str] = None,
-        handle: Optional[str] = None,
+        did: Optional[Did] = None,
+        handle: Optional[Handle] = None,
         strict_string_flag: Optional[bool] = None
     ):
         out = {
