@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
-from typing import Annotated, Any, Literal, Optional, cast
-from pydantic import BaseModel, BeforeValidator, Field, TypeAdapter, ValidationError, model_validator
+import os
+from typing import Annotated, Any, ClassVar, Literal, Optional, cast
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
 from at_url_converter.boilerplate import get_index, get_timed_logger
 import re
 from atproto import AsyncIdResolver, AsyncDidInMemoryCache, AsyncClient
@@ -9,6 +10,9 @@ from atproto_client.models.com.atproto.repo.list_records import Params, Record
 # TODO consider switching to a different parsing lib for better validation https://sethmlarson.dev/why-urls-are-hard-path-params-urlparse
 from urllib.parse import urlparse, parse_qsl, unquote, urlunparse
 from atproto_client.models.string_formats import Did, Handle, AtIdentifier, Nsid, RecordKey
+
+VALIDATE_AT_URL_FIELDS = os.environ.get("AT_URL_CONVERTER_VALIDATE_AT_URL_FIELDS", "0") # s1 to enable globally, 0 or unset to disable
+
 log = get_timed_logger("converter")
 
 MAX_LIST_LIMIT = 100
@@ -27,21 +31,27 @@ def path_index(path: list[str] | str, index: int, default: Optional[str] = None)
         path = split_path(path)
     return get_index(path, index, default)
 
-def match_parsed_query(data):
+type parsed_query = list[tuple[str, str]]
+def parse_query(query_str: str) -> parsed_query:
+    return [(unquote(k), unquote(v)) for k, v in parse_qsl(query_str)]
+
+
+type query_or_str = str | parsed_query
+def parse_query_str(data: query_or_str) -> parsed_query:
     if isinstance(data, str):
         return parse_query(data)
     else:
         return data
 
-def parse_query(query_str: str) -> list[tuple[str, str]]:
-    return [(unquote(k), unquote(v)) for k, v in parse_qsl(query_str)]
-
-def find_query_param(param: str, query: str | list[tuple[str, str]]) -> str | None:
-    if isinstance(query, str):
-        query = parse_query(query)
+def find_query_param(param: str, query: query_or_str, ensure_unique = True) -> str | None:
+    query = parse_query_str(query)
     found = [p[1] for p in query if p[0] == param]
     if len(found) > 1:
-        log.error(f"found multiple values for param {param} in query {query}:\n{found}")
+        error_msg = f"multiple values for {param} in query {query}:\n{found}"
+        if ensure_unique:
+            raise ValueError(error_msg)
+        else:
+            log.error(error_msg)
     return found[0] if found else None
 
 class url_obj:
@@ -77,13 +87,14 @@ class url_obj:
 
 class at_url(BaseModel):
     """object that stores components of an at URI. parts acessible by dot notation"""
-    did: Did = ""
-    collection: Nsid = ""
-    rkey: RecordKey = ""
-    # query and fragment are mostly unused for now, so we don't show them in repr
-    query: Annotated[list[tuple[str, str]], Field(repr=False), BeforeValidator(match_parsed_query)] = []
+    did: Did | Literal[""] = ""
+    collection: Nsid | Literal[""] = ""
+    rkey: RecordKey | Literal[""] = ""
+    query: Annotated[list[tuple[str, str]], Field(repr=False), BeforeValidator(parse_query_str)] = []
     fragment: Annotated[str, Field(repr=False)] = ""
-    handle: Handle = ""
+    handle: Handle | Literal[""] = ""
+
+    strict_string_flag: ClassVar[bool] = bool(int(VALIDATE_AT_URL_FIELDS))
 
     def __init__(
         self,
@@ -95,6 +106,7 @@ class at_url(BaseModel):
         *,
         did: Optional[str] = None,
         handle: Optional[str] = None,
+        strict_string_flag: Optional[bool] = None
     ):
         out = {
             "did": did or "",
@@ -105,25 +117,21 @@ class at_url(BaseModel):
             "fragment": fragment or "",
         }
         if repo:
-            repo = repo.removeprefix("@")
-            try:
-                TypeAdapter(Did).validate_python(repo, context={"strict_string_format": True})
+            if repo.startswith("did:"):
                 if did:
-                    log.warning(f"make_at_url: did {did} is being replaced by positional repo {repo}")
+                    log.warning(f"make_at_url: did {did} is being replaced by repo {repo}")
                 out["did"] = repo
-            except ValidationError:
-                try:
-                    TypeAdapter(Handle).validate_python(repo, context={"strict_string_format": True})
-                    if handle:
-                        log.warning(f"make_at_url: handle {handle} is being replaced by positional repo {repo}")
-                    out["handle"] = repo
-                except ValidationError:
-                    pass # if it is neither, there might still be a valid did or handle in the kwargs, so we don't raise an error here
-        #TODO enable actual validation of did and handle when passed as kwargs
-        return super().__init__(**out)
+            else:
+                if handle:
+                    log.warning(f"make_at_url: handle {handle} is being replaced by repo {repo}")
+                out["handle"] = repo
+
+        if strict_string_flag is None:
+            strict_string_flag = at_url.strict_string_flag
+        self.__pydantic_validator__.validate_python(out, self_instance=self, context={"strict_string_format": strict_string_flag})
 
     @model_validator(mode="after")
-    def _check_handle_or_did(self):
+    def _check_repo(self):
         if not (self.handle or self.did):
             raise ValueError("at_url: either 'handle' or 'did' must be present")
         return self
@@ -268,10 +276,8 @@ class at_url(BaseModel):
         rs = self.rkey
         ps = cs + "/" + rs if rs else cs
         ql = getattr(self, "query", [])
-        qs = "&".join("=".join((i[0], i[1])) for i in ql) if self.query else "" # using .join because not all queries have params
+        qs = "&".join("=".join((i[0], i[1])) for i in ql) if self.query else "" # using .join() because not all queries have params
         return urlunparse(("at", self.repo, ps, "", qs, self.fragment or ""))
-
-print(at_url.model_validate({"did": "did:example:1234567890abcdef", "collection": "app.bsky.feed.post", "rkey": "123456789abcdefghi", "query": [("param", "value")], "fragment": "fragment"}, context={"strict_string_format": True}))
 
 # afaict these use a single global client so we should be good to loop
 resolver = AsyncIdResolver(cache=AsyncDidInMemoryCache())

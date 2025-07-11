@@ -1,3 +1,4 @@
+from pydantic import ValidationError
 import pytest
 import at_url_converter.atproto_utils as atproto_utils
 from at_url_converter.atproto_utils import at_url
@@ -16,8 +17,12 @@ async def test_at_url_initialization():
     assert uri.did == ""
 
     # Test initialization with invalid repo
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         at_url(repo=INVALID_REPO)
+
+    # Test initialization with no repo
+    with pytest.raises(ValidationError):
+        at_url()
 
 async def test_at_url_from_str():
     # Test parsing a valid URL
