@@ -207,7 +207,7 @@ class at_url(BaseModel):
                 if doc_handle and valid:
                     if self.handle != doc_handle:
                         log.info(f"replacing self's handle {self.handle} with {doc_handle}")
-                    self.handle = doc_handle
+                        self.handle = doc_handle
                 elif doc_handle and not valid:
                     # TODO should probably do something more significant that warning. alternate return val?
                     log.warning(f"found new handle {doc_handle} but could not verify")
